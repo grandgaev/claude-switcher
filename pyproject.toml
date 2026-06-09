@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-switcher"
+version = "0.1.0"
+description = "Auth-only multi-account orchestrator for Claude Code (Windows TUI)"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+authors = [{name = "grandgaev"}]
+keywords = ["claude", "claude-code", "tui", "textual", "account", "switcher"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "textual>=0.86.0",
+    "rich>=13.7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/grandgaev/claude-switcher"
+Repository = "https://github.com/grandgaev/claude-switcher"
+Issues = "https://github.com/grandgaev/claude-switcher/issues"
+
+[project.scripts]
+claude-switcher = "claude_switcher.__main__:main"
+cswitch = "claude_switcher.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+claude_switcher = ["*.tcss"]
