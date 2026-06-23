@@ -14,17 +14,19 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .i18n import t
+from .warming import WarmupSnapshot, warm_credentials
 
 
 VALID_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}$")
 MAX_SAFETY_SNAPSHOTS = 20
 BUNDLE_SUFFIX = ".account.json"
 BUNDLE_VERSION = 1
+WARMUP_CACHE_FILENAME = ".warmup-cache.json"
 
 # Whitelist of fields in ~/.claude.json that carry identity / auth.
 # Everything else (projects, mcpServers, tipsHistory, numStartups, …) stays.
@@ -112,6 +114,7 @@ class AccountManager:
         self.claude_config = Path(claude_config or home / ".claude.json")
         self.backup_dir = Path(backup_dir or home / ".claude-accounts")
         self.safety_dir = self.backup_dir / ".safety-snapshots"
+        self.warmup_cache_path = self.backup_dir / WARMUP_CACHE_FILENAME
         self.backup_dir.mkdir(parents=True, exist_ok=True)
         self.safety_dir.mkdir(parents=True, exist_ok=True)
 
@@ -246,6 +249,7 @@ class AccountManager:
         if self.current_account_name() == name:
             raise SwitcherError(t("err.cannot_delete_active"))
         path.unlink()
+        self._forget_warmup(name)
 
     def rename_account(self, old: str, new: str) -> None:
         self.validate_name(new)
@@ -261,6 +265,87 @@ class AccountManager:
         bundle.name = new
         _write_bundle(new_path, bundle)
         old_path.unlink()
+        cache = self._read_warmup_cache()
+        if old in cache:
+            cache[new] = cache.pop(old)
+            _atomic_write_text(
+                self.warmup_cache_path,
+                json.dumps(cache, indent=2, ensure_ascii=False),
+            )
+
+    # ---- warm-up ----
+
+    def warm_account(self, name: str) -> WarmupSnapshot:
+        """Ping Haiku 4.5 with the account's OAuth bundle.
+
+        Rotated tokens are written back to the bundle, and to the live
+        ``.credentials.json`` when the account is currently active. The
+        resulting snapshot is cached so the TUI can show timers between
+        runs.
+        """
+        path = self._bundle_path(name)
+        if not path.exists():
+            raise SwitcherError(t("err.account_not_saved", name=name))
+        bundle = _read_bundle(path)
+        if not bundle.credentials_text:
+            raise SwitcherError(t("err.no_credentials_to_warm", name=name))
+
+        was_active = self.current_account_name() == name
+        snapshot, refreshed_text = warm_credentials(bundle.credentials_text)
+
+        if refreshed_text and refreshed_text != bundle.credentials_text:
+            bundle.credentials_text = refreshed_text
+            _write_bundle(path, bundle)
+            if was_active:
+                self.claude_dir.mkdir(parents=True, exist_ok=True)
+                _atomic_write_text(self.credentials_path, refreshed_text)
+
+        self._update_warmup_cache(name, snapshot)
+        return snapshot
+
+    def get_warmup_snapshot(self, name: str) -> WarmupSnapshot | None:
+        cache = self._read_warmup_cache()
+        raw = cache.get(name)
+        if not raw:
+            return None
+        try:
+            return WarmupSnapshot.from_json(raw)
+        except (KeyError, ValueError, TypeError):
+            return None
+
+    def warmup_snapshots(self) -> dict[str, WarmupSnapshot]:
+        cache = self._read_warmup_cache()
+        out: dict[str, WarmupSnapshot] = {}
+        for name, raw in cache.items():
+            try:
+                out[name] = WarmupSnapshot.from_json(raw)
+            except (KeyError, ValueError, TypeError):
+                continue
+        return out
+
+    def _read_warmup_cache(self) -> dict[str, Any]:
+        if not self.warmup_cache_path.exists():
+            return {}
+        try:
+            data = json.loads(self.warmup_cache_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return data
+
+    def _update_warmup_cache(self, name: str, snapshot: WarmupSnapshot) -> None:
+        cache = self._read_warmup_cache()
+        cache[name] = snapshot.to_json()
+        # Drop entries for accounts that no longer exist on disk.
+        live_names = {p.name[: -len(BUNDLE_SUFFIX)]
+                      for p in self.backup_dir.glob(f"*{BUNDLE_SUFFIX}")
+                      if not p.name.startswith(".")}
+        cache = {k: v for k, v in cache.items() if k in live_names}
+        _atomic_write_text(
+            self.warmup_cache_path,
+            json.dumps(cache, indent=2, ensure_ascii=False),
+        )
 
     # ---- safety snapshots ----
 
@@ -309,6 +394,15 @@ class AccountManager:
         self.safety_snapshot(f"before-restore")
         bundle = _read_bundle(path)
         self._apply_bundle(bundle)
+
+    def _forget_warmup(self, name: str) -> None:
+        cache = self._read_warmup_cache()
+        if name in cache:
+            cache.pop(name, None)
+            _atomic_write_text(
+                self.warmup_cache_path,
+                json.dumps(cache, indent=2, ensure_ascii=False),
+            )
 
     def _prune_snapshots(self) -> None:
         snaps = self.list_snapshots()

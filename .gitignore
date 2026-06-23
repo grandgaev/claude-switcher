@@ -28,7 +28,7 @@ Thumbs.db
 
 # PyInstaller
 *.spec
-!claude-switcher.spec
+cli_entry.py
 
 # Local
 _smoke_sandbox/

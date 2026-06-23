@@ -40,6 +40,9 @@ _EN: dict[str, str] = {
     "ui.col.email": "Email",
     "ui.col.org": "Org",
     "ui.col.updated": "Updated",
+    "ui.col.session": "5h",
+    "ui.col.weekly": "Week",
+    "ui.col.warmed": "Warmed",
     # detail panel
     "ui.detail.title": "Account details",
     "ui.detail.name": "Name",
@@ -57,6 +60,18 @@ _EN: dict[str, str] = {
     "ui.detail.status_active": "active",
     "ui.detail.status_saved": "saved",
     "ui.detail.empty": "No saved accounts yet.",
+    "ui.detail.section.usage": "Usage & resets",
+    "ui.detail.usage.session": "5h session",
+    "ui.detail.usage.weekly": "Weekly",
+    "ui.detail.usage.weekly_opus": "Weekly Opus",
+    "ui.detail.usage.checked": "Last warm-up",
+    "ui.detail.usage.never": "never",
+    "ui.detail.usage.pending": "not checked yet — press w",
+    "ui.detail.usage.error": "warm-up failed: {error}",
+    "ui.detail.usage.value": "{used}% used · resets in {eta}",
+    "ui.detail.usage.value_status": "status={status} · resets in {eta}",
+    "ui.detail.usage.value_status_only": "status={status}",
+    "ui.detail.usage.value_unknown": "no data from server",
     # snapshots
     "ui.snapshot_title": "Safety snapshots",
     "ui.snapshot.no_email": "(no email)",
@@ -77,6 +92,14 @@ _EN: dict[str, str] = {
     "ui.notify.select_account": "Select an account in the list first.",
     "ui.notify.select_snapshot": "Select a snapshot on the right.",
     "ui.notify.language_set": "Language set: {lang}",
+    "ui.notify.warming": "Warming up “{name}”…",
+    "ui.notify.warmed": "“{name}” warmed: {summary}",
+    "ui.notify.warm_failed": "Warm-up failed for “{name}”: {error}",
+    "ui.notify.warming_all": "Warming up {count} account(s)…",
+    "ui.notify.warm_all_done": "Warm-up done: {ok}/{total} succeeded.",
+    "ui.notify.summary.session": "5h {pct}% · {eta}",
+    "ui.notify.summary.weekly": "Week {pct}% · {eta}",
+    "ui.notify.summary.empty": "no rate-limit headers in response",
     # bindings (Footer)
     "ui.binding.switch": "switch",
     "ui.binding.save": "save",
@@ -84,6 +107,8 @@ _EN: dict[str, str] = {
     "ui.binding.delete": "delete",
     "ui.binding.snapshot": "snapshot",
     "ui.binding.refresh": "refresh",
+    "ui.binding.warm": "warm",
+    "ui.binding.warm_all": "warm all",
     "ui.binding.lang": "language",
     "ui.binding.help": "help",
     "ui.binding.quit": "quit",
@@ -124,6 +149,8 @@ _EN: dict[str, str] = {
         "[b]r[/]               rename selected\n"
         "[b]d[/]               delete selected\n"
         "[b]b[/]               restore from a safety snapshot\n"
+        "[b]w[/]               warm up selected account (ping Haiku 4.5)\n"
+        "[b]W / Shift+W[/]     warm up every saved account\n"
         "[b]l[/]               change language\n"
         "[b]F5[/]              refresh\n"
         "[b]?[/]               this screen\n"
@@ -136,6 +163,11 @@ _EN: dict[str, str] = {
         "[#7fb069 b]What is shared[/]: project history, "
         "memory (CLAUDE.md, memory/), todos, MCP servers, theme, "
         "IDE settings — never touched.\n"
+        "\n"
+        "[#d97757 b]Warm-up[/]: sends a 1-token “hi” to "
+        "[i]claude-haiku-4-5[/] using the saved OAuth token, then "
+        "shows how much of the 5h session window and the weekly "
+        "window is already spent and when each one resets.\n"
         "\n"
         "[dim]A safety snapshot of the live auth is taken before "
         "every switch and restore (the last 20 are kept).[/]"
@@ -160,6 +192,7 @@ _EN: dict[str, str] = {
     "err.account_exists": "Account “{name}” already exists.",
     "err.snapshot_not_found": "Snapshot “{name}” not found.",
     "err.bad_bundle": "Corrupt bundle: {name}",
+    "err.no_credentials_to_warm": "Account “{name}” has no credentials saved — nothing to warm up.",
     # humanize age
     "time.now": "just now",
     "time.min": "{n} min ago",
@@ -188,6 +221,9 @@ _RU: dict[str, str] = {
     "ui.col.email": "Email",
     "ui.col.org": "Org",
     "ui.col.updated": "Обновлён",
+    "ui.col.session": "5ч",
+    "ui.col.weekly": "Неделя",
+    "ui.col.warmed": "Прогрев",
     "ui.detail.title": "Детали аккаунта",
     "ui.detail.name": "Имя",
     "ui.detail.email": "Email",
@@ -204,6 +240,18 @@ _RU: dict[str, str] = {
     "ui.detail.status_active": "активный",
     "ui.detail.status_saved": "сохранённый",
     "ui.detail.empty": "Сохранённых аккаунтов пока нет.",
+    "ui.detail.section.usage": "Использование и сбросы",
+    "ui.detail.usage.session": "Сессия 5ч",
+    "ui.detail.usage.weekly": "Неделя",
+    "ui.detail.usage.weekly_opus": "Неделя Opus",
+    "ui.detail.usage.checked": "Последний прогрев",
+    "ui.detail.usage.never": "никогда",
+    "ui.detail.usage.pending": "ещё не прогревался — нажми w",
+    "ui.detail.usage.error": "ошибка прогрева: {error}",
+    "ui.detail.usage.value": "{used}% использовано · сброс через {eta}",
+    "ui.detail.usage.value_status": "статус={status} · сброс через {eta}",
+    "ui.detail.usage.value_status_only": "статус={status}",
+    "ui.detail.usage.value_unknown": "сервер не вернул данные",
     "ui.snapshot_title": "Safety snapshots",
     "ui.snapshot.no_email": "(без email)",
     "ui.snapshot.no_auth": "(нет auth)",
@@ -222,12 +270,22 @@ _RU: dict[str, str] = {
     "ui.notify.select_account": "Выбери аккаунт в списке.",
     "ui.notify.select_snapshot": "Выбери snapshot в правой панели.",
     "ui.notify.language_set": "Язык: {lang}",
+    "ui.notify.warming": "Прогреваю «{name}»…",
+    "ui.notify.warmed": "«{name}» прогрет: {summary}",
+    "ui.notify.warm_failed": "Прогрев «{name}» провалился: {error}",
+    "ui.notify.warming_all": "Прогреваю {count} аккаунт(ов)…",
+    "ui.notify.warm_all_done": "Прогрев завершён: {ok}/{total} успешно.",
+    "ui.notify.summary.session": "5ч {pct}% · {eta}",
+    "ui.notify.summary.weekly": "Неделя {pct}% · {eta}",
+    "ui.notify.summary.empty": "сервер не вернул rate-limit заголовков",
     "ui.binding.switch": "переключить",
     "ui.binding.save": "сохранить",
     "ui.binding.rename": "переимен.",
     "ui.binding.delete": "удалить",
     "ui.binding.snapshot": "snapshot",
     "ui.binding.refresh": "обновить",
+    "ui.binding.warm": "прогрев",
+    "ui.binding.warm_all": "прогрев всех",
     "ui.binding.lang": "язык",
     "ui.binding.help": "помощь",
     "ui.binding.quit": "выход",
@@ -260,6 +318,8 @@ _RU: dict[str, str] = {
         "[b]r[/]               переименовать выбранный\n"
         "[b]d[/]               удалить выбранный\n"
         "[b]b[/]               восстановить из safety-snapshot\n"
+        "[b]w[/]               прогреть выбранный аккаунт (ping Haiku 4.5)\n"
+        "[b]W / Shift+W[/]     прогреть все сохранённые аккаунты\n"
         "[b]l[/]               сменить язык\n"
         "[b]F5[/]              обновить список\n"
         "[b]?[/]               этот экран\n"
@@ -272,6 +332,11 @@ _RU: dict[str, str] = {
         "[#7fb069 b]Что остаётся общим[/]: история проектов, "
         "память (CLAUDE.md, memory/), todos, MCP-серверы, тема, "
         "настройки IDE — всё это никогда не трогается.\n"
+        "\n"
+        "[#d97757 b]Прогрев[/]: отправляет короткое «hi» к "
+        "[i]claude-haiku-4-5[/] под сохранённым OAuth-токеном, "
+        "после чего показывает, сколько съедено за 5-часовую сессию "
+        "и за неделю и когда оба лимита обнулятся.\n"
         "\n"
         "[dim]Перед каждым переключением и восстановлением "
         "создаётся snapshot текущей auth в "
@@ -295,6 +360,7 @@ _RU: dict[str, str] = {
     "err.account_exists": "Аккаунт «{name}» уже существует.",
     "err.snapshot_not_found": "Snapshot «{name}» не найден.",
     "err.bad_bundle": "Битый бандл: {name}",
+    "err.no_credentials_to_warm": "У «{name}» не сохранены credentials — прогревать нечего.",
     "time.now": "только что",
     "time.min": "{n} мин назад",
     "time.hour": "{n} ч назад",

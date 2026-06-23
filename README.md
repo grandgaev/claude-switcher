@@ -79,10 +79,14 @@ claude-switcher          # or: cswitch
 | `r`       | Rename selected                       |
 | `d`       | Delete selected (active is protected) |
 | `b`       | Restore from a safety snapshot        |
+| `w`       | Warm up selected (ping Haiku 4.5)     |
+| `W`       | Warm up every saved account           |
 | `l`       | Change interface language             |
 | `F5`      | Refresh                               |
 | `?`       | Help                                  |
 | `q`       | Quit                                  |
+
+The account list shows two extra columns: **5h** (session window) and **Week** (weekly window) with `% used · resets in …`. They populate after the first warm-up and survive restarts (cached in `~/.claude-accounts/.warmup-cache.json`).
 
 #### CLI (scriptable)
 
@@ -91,9 +95,20 @@ claude-switcher list                   # all accounts
 claude-switcher status                 # which one is active
 claude-switcher switch work-main       # apply named account
 claude-switcher save personal          # snapshot current auth
+claude-switcher warm                   # ping Haiku 4.5 with every account
+claude-switcher warm work-main         # ping just one
 claude-switcher lang en                # persist language
 claude-switcher --lang ru list         # one-off override
 ```
+
+### Warm-up
+
+`w` (or `claude-switcher warm`) sends one short `hi` to `claude-haiku-4-5` using the saved OAuth token of the account, then captures the `anthropic-ratelimit-unified-*` response headers so the TUI can show:
+
+- **5h session** — how much of the 5-hour window is spent and when it resets.
+- **Weekly** — same for the 7-day window (with the optional Opus weekly bucket if Anthropic returns one).
+
+If the access token is close to expiring, it is refreshed via `https://console.anthropic.com/v1/oauth/token` before the ping and the new token is written back to the bundle (and to live `~/.claude/.credentials.json` if the warmed account is currently active).
 
 ### How it works
 
@@ -199,10 +214,14 @@ claude-switcher          # или: cswitch
 | `r`       | Переименовать выделенный                 |
 | `d`       | Удалить выделенный (активный защищён)    |
 | `b`       | Восстановить из safety-snapshot          |
+| `w`       | Прогреть выделенный (ping Haiku 4.5)     |
+| `W`       | Прогреть все сохранённые аккаунты        |
 | `l`       | Сменить язык интерфейса                  |
 | `F5`      | Обновить                                 |
 | `?`       | Помощь                                   |
 | `q`       | Выход                                    |
+
+В списке аккаунтов появляются две дополнительные колонки: **5ч** (сессия) и **Неделя** (недельный лимит) с форматом `% использовано · сброс через …`. Заполняются после первого прогрева и переживают перезапуск — кешируются в `~/.claude-accounts/.warmup-cache.json`.
 
 #### CLI (скриптовый)
 
@@ -211,9 +230,20 @@ claude-switcher list                   # все аккаунты
 claude-switcher status                 # кто сейчас активен
 claude-switcher switch work-main       # применить аккаунт
 claude-switcher save personal          # сохранить текущую авторизацию
+claude-switcher warm                   # прогреть все аккаунты
+claude-switcher warm work-main         # прогреть один
 claude-switcher lang ru                # сохранить язык
 claude-switcher --lang en list         # разовое переопределение
 ```
+
+### Прогрев
+
+`w` (или `claude-switcher warm`) отправляет короткое `hi` к `claude-haiku-4-5` под сохранённым OAuth-токеном, потом ловит заголовки `anthropic-ratelimit-unified-*` чтобы показать:
+
+- **Сессия 5ч** — сколько съедено за 5-часовое окно и когда оно обнулится.
+- **Неделя** — то же для 7-дневного окна (и отдельно weekly Opus, если Anthropic его вернёт).
+
+Если access-token близок к истечению, он рефрешится через `https://console.anthropic.com/v1/oauth/token` перед пингом и записывается обратно в бандл (а если аккаунт сейчас активный — ещё и в живой `~/.claude/.credentials.json`).
 
 ### Как это устроено
 
@@ -255,6 +285,7 @@ claude-switcher --lang en list         # разовое переопределе
 PRs welcome. The code is small and well-typed:
 
 - `core.py` — the manager (no UI deps)
+- `warming.py` — OAuth ping + rate-limit header parser (stdlib only)
 - `app.py` — Textual TUI
 - `i18n.py` — translations; add a language by appending to `TRANSLATIONS` and updating `LANGUAGE_CHOICES`
 - `modals.py` — modal screens

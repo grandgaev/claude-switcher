@@ -1,6 +1,7 @@
 """Textual TUI orchestrator for Claude Code accounts."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Iterable
 
 from rich.text import Text
@@ -29,11 +30,90 @@ from .core import (
 )
 from .i18n import LangChoice, current_choice, set_language, t
 from .modals import ConfirmModal, HelpModal, LanguageModal, TextPromptModal
+from .warming import LimitWindow, WarmupSnapshot, format_eta
 
 
 ACCENT = "#d97757"
 MUTED = "#888579"
 DANGER = "#e76f51"
+WARN = "#e0a800"
+OK_COLOR = "#7fb069"
+
+
+def _usage_color(used_pct: int | None) -> str:
+    if used_pct is None:
+        return MUTED
+    if used_pct >= 90:
+        return DANGER
+    if used_pct >= 60:
+        return WARN
+    return OK_COLOR
+
+
+def _cell_for_window(window: LimitWindow | None) -> Text:
+    """Render the per-account 5h / weekly cell as a single short string."""
+    if window is None:
+        return Text("—", style=MUTED)
+    used = window.used_pct
+    eta = format_eta(window.reset_at)
+    if used is None and window.status is None:
+        return Text("—", style=MUTED)
+    if used is None:
+        label = f"{window.status or '—'} · {eta}"
+        return Text(label, style=WARN if window.status not in (None, "ok") else MUTED)
+    color = _usage_color(used)
+    return Text(f"{used}% · {eta}", style=color)
+
+
+def _format_warmed_cell(snapshot: WarmupSnapshot | None) -> Text:
+    if snapshot is None:
+        return Text("—", style=MUTED)
+    if not snapshot.ok:
+        return Text("err", style=DANGER)
+    local = _to_local(snapshot.checked_at)
+    if local is None:
+        return Text("—", style=MUTED)
+    return Text(_humanize_since(local), style=MUTED)
+
+
+def _humanize_since(when_local: datetime) -> str:
+    delta = datetime.now(when_local.tzinfo) - when_local
+    seconds = int(delta.total_seconds())
+    if seconds < 0:
+        return when_local.strftime("%H:%M")
+    if seconds < 60:
+        return "только что"
+    if seconds < 3600:
+        return f"{seconds // 60}м назад"
+    if seconds < 86400:
+        return f"{seconds // 3600}ч назад"
+    days = seconds // 86400
+    if days < 30:
+        return f"{days}д назад"
+    return when_local.strftime("%Y-%m-%d")
+
+
+def _summary_for_notification(snapshot: WarmupSnapshot) -> str:
+    parts: list[str] = []
+    if snapshot.five_hour and snapshot.five_hour.used_pct is not None:
+        parts.append(
+            t(
+                "ui.notify.summary.session",
+                pct=snapshot.five_hour.used_pct,
+                eta=format_eta(snapshot.five_hour.reset_at),
+            )
+        )
+    if snapshot.weekly and snapshot.weekly.used_pct is not None:
+        parts.append(
+            t(
+                "ui.notify.summary.weekly",
+                pct=snapshot.weekly.used_pct,
+                eta=format_eta(snapshot.weekly.reset_at),
+            )
+        )
+    if not parts:
+        return t("ui.notify.summary.empty")
+    return " · ".join(parts)
 
 
 class StatusBar(Static):
@@ -67,9 +147,11 @@ class DetailPanel(Static):
     def __init__(self) -> None:
         super().__init__()
         self._account: Account | None = None
+        self._warmup: WarmupSnapshot | None = None
 
-    def show(self, account: Account | None) -> None:
+    def show(self, account: Account | None, warmup: WarmupSnapshot | None = None) -> None:
         self._account = account
+        self._warmup = warmup
         self.refresh_panel()
 
     def refresh_panel(self) -> None:
@@ -103,7 +185,59 @@ class DetailPanel(Static):
             text.append(f"  {label:<12}", style=MUTED)
             style = f"bold {ACCENT}" if key in highlight_keys else "white"
             text.append(f"{value}\n", style=style)
+
+        text.append(f"\n{t('ui.detail.section.usage')}\n", style=f"bold {ACCENT}")
+        self._append_usage(text)
         self.update(text)
+
+    def _append_usage(self, text: Text) -> None:
+        snap = self._warmup
+        if snap is None:
+            text.append(f"  {t('ui.detail.usage.pending')}\n", style=MUTED)
+            return
+        checked_local = _to_local(snap.checked_at)
+        checked_str = checked_local.strftime("%Y-%m-%d %H:%M") if checked_local else t(
+            "ui.detail.usage.never"
+        )
+        text.append(f"  {t('ui.detail.usage.checked'):<14}", style=MUTED)
+        text.append(f"{checked_str}\n", style="white")
+        if not snap.ok:
+            text.append(
+                f"  {t('ui.detail.usage.error', error=snap.error or '—')}\n",
+                style=DANGER,
+            )
+            return
+        windows = [
+            (t("ui.detail.usage.session"), snap.five_hour),
+            (t("ui.detail.usage.weekly"), snap.weekly),
+            (t("ui.detail.usage.weekly_opus"), snap.weekly_opus),
+        ]
+        for label, window in windows:
+            if window is None:
+                continue
+            text.append(f"  {label:<14}", style=MUTED)
+            text.append(f"{_format_window_line(window)}\n",
+                        style=_usage_color(window.used_pct))
+
+
+def _format_window_line(window: LimitWindow) -> str:
+    used = window.used_pct
+    eta = format_eta(window.reset_at)
+    if used is not None:
+        return t("ui.detail.usage.value", used=used, eta=eta)
+    if window.status:
+        if window.reset_at:
+            return t("ui.detail.usage.value_status", status=window.status, eta=eta)
+        return t("ui.detail.usage.value_status_only", status=window.status)
+    return t("ui.detail.usage.value_unknown")
+
+
+def _to_local(dt: datetime | None) -> datetime | None:
+    if dt is None or dt == datetime.min:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone()
 
 
 class SnapshotList(ListView):
@@ -135,6 +269,8 @@ _BINDING_KEYS: dict[str, str] = {
     "delete": "ui.binding.delete",
     "restore": "ui.binding.snapshot",
     "refresh": "ui.binding.refresh",
+    "warm": "ui.binding.warm",
+    "warm_all": "ui.binding.warm_all",
     "language": "ui.binding.lang",
     "help": "ui.binding.help",
     "quit": "ui.binding.quit",
@@ -151,6 +287,8 @@ class AccountsApp(App):
         Binding("r", "rename", "rename"),
         Binding("d", "delete", "delete"),
         Binding("b", "restore", "snapshot"),
+        Binding("w", "warm", "warm"),
+        Binding("W", "warm_all", "warm all"),
         Binding("l", "language", "language"),
         Binding("f5", "refresh", "refresh"),
         Binding("question_mark", "help", "help", key_display="?"),
@@ -161,6 +299,7 @@ class AccountsApp(App):
         super().__init__()
         self.manager = manager or AccountManager()
         self._accounts: list[Account] = []
+        self._warmups: dict[str, WarmupSnapshot] = {}
         self.title = t("ui.app.title")
         self.sub_title = t("ui.app.subtitle")
 
@@ -177,7 +316,9 @@ class AccountsApp(App):
                     t("ui.col.marker"),
                     t("ui.col.name"),
                     t("ui.col.email"),
-                    t("ui.col.org"),
+                    t("ui.col.session"),
+                    t("ui.col.weekly"),
+                    t("ui.col.warmed"),
                     t("ui.col.updated"),
                 )
                 yield table
@@ -195,6 +336,7 @@ class AccountsApp(App):
 
     def refresh_all(self) -> None:
         self._accounts = self.manager.list_accounts()
+        self._warmups = self.manager.warmup_snapshots()
         snapshots = self.manager.list_snapshots()
         current = next((a.name for a in self._accounts if a.is_current), None)
 
@@ -208,12 +350,18 @@ class AccountsApp(App):
         cursor_row = table.cursor_row
         table.clear()
         for a in self._accounts:
+            warmup = self._warmups.get(a.name)
             marker = Text("●", style=ACCENT) if a.is_current else Text("○", style=MUTED)
             name = Text(a.name, style=f"bold {ACCENT}" if a.is_current else "white")
             email = Text(a.email or "—", style="white" if a.email else MUTED)
-            org = Text(a.organization or "—", style=MUTED)
+            session_cell = _cell_for_window(warmup.five_hour if warmup and warmup.ok else None)
+            weekly_cell = _cell_for_window(warmup.weekly if warmup and warmup.ok else None)
+            warmed_cell = _format_warmed_cell(warmup)
             updated = Text(humanize_age(a.saved_at), style=MUTED)
-            table.add_row(marker, name, email, org, updated, key=a.name)
+            table.add_row(
+                marker, name, email, session_cell, weekly_cell, warmed_cell, updated,
+                key=a.name,
+            )
 
         if self._accounts:
             target_row = min(cursor_row, len(self._accounts) - 1) if cursor_row >= 0 else 0
@@ -225,7 +373,8 @@ class AccountsApp(App):
     def _update_detail_for_row(self, row: int) -> None:
         panel = self.query_one(DetailPanel)
         if 0 <= row < len(self._accounts):
-            panel.show(self._accounts[row])
+            account = self._accounts[row]
+            panel.show(account, self._warmups.get(account.name))
         else:
             panel.show(None)
 
@@ -468,6 +617,68 @@ class AccountsApp(App):
         self.refresh_all()
         self._notify_ok(t("ui.notify.list_refreshed"))
 
+    @work(exclusive=False, thread=True)
+    def _warm_worker(self, name: str) -> None:
+        try:
+            snapshot = self.manager.warm_account(name)
+        except SwitcherError as exc:
+            self.call_from_thread(self._notify_error, exc)
+            return
+        except Exception as exc:  # pragma: no cover - defensive
+            self.call_from_thread(self._notify_error, exc)
+            return
+
+        if snapshot.ok:
+            summary = _summary_for_notification(snapshot)
+            self.call_from_thread(
+                self._notify_ok, t("ui.notify.warmed", name=name, summary=summary)
+            )
+        else:
+            self.call_from_thread(
+                self._notify_error,
+                SwitcherError(
+                    t("ui.notify.warm_failed", name=name, error=snapshot.error or "—")
+                ),
+            )
+        self.call_from_thread(self.refresh_all)
+
+    def action_warm(self) -> None:
+        account = self._selected_account()
+        if not account:
+            self._notify_error(SwitcherError(t("ui.notify.select_account")))
+            return
+        if not account.has_credentials:
+            self._notify_error(SwitcherError(t("err.no_credentials_to_warm", name=account.name)))
+            return
+        self._notify_ok(t("ui.notify.warming", name=account.name))
+        self._warm_worker(account.name)
+
+    @work(exclusive=True, thread=True)
+    def _warm_all_worker(self, names: list[str]) -> None:
+        ok = 0
+        for name in names:
+            try:
+                snapshot = self.manager.warm_account(name)
+            except SwitcherError:
+                continue
+            except Exception:  # pragma: no cover - defensive
+                continue
+            if snapshot.ok:
+                ok += 1
+            self.call_from_thread(self.refresh_all)
+        self.call_from_thread(
+            self._notify_ok,
+            t("ui.notify.warm_all_done", ok=ok, total=len(names)),
+        )
+
+    def action_warm_all(self) -> None:
+        names = [a.name for a in self._accounts if a.has_credentials]
+        if not names:
+            self._notify_error(SwitcherError(t("ui.notify.select_account")))
+            return
+        self._notify_ok(t("ui.notify.warming_all", count=len(names)))
+        self._warm_all_worker(names)
+
     def action_help(self) -> None:
         self.push_screen(HelpModal())
 
@@ -498,7 +709,9 @@ class AccountsApp(App):
             t("ui.col.marker"),
             t("ui.col.name"),
             t("ui.col.email"),
-            t("ui.col.org"),
+            t("ui.col.session"),
+            t("ui.col.weekly"),
+            t("ui.col.warmed"),
             t("ui.col.updated"),
         )
 

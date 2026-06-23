@@ -7,6 +7,7 @@ import sys
 from .app import AccountsApp
 from .core import AccountManager, SwitcherError, humanize_age
 from .i18n import LANGUAGE_CHOICES, current_choice, current_lang, init, set_language, t
+from .warming import format_eta
 
 
 def _force_utf8_stdout() -> None:
@@ -39,6 +40,15 @@ def main(argv: list[str] | None = None) -> int:
     p_switch.add_argument("name")
     p_save = sub.add_parser("save", help="save current auth as an account")
     p_save.add_argument("name")
+    p_warm = sub.add_parser(
+        "warm",
+        help="ping Haiku 4.5 with one or more accounts and show limits",
+    )
+    p_warm.add_argument(
+        "names",
+        nargs="*",
+        help="account names to warm (defaults to every saved account)",
+    )
     p_lang = sub.add_parser("lang", help="get or set persistent language (auto|en|ru)")
     p_lang.add_argument("choice", nargs="?", choices=LANGUAGE_CHOICES)
 
@@ -91,6 +101,39 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(t("cli.saved", name=args.name))
         return 0
+
+    if args.cmd == "warm":
+        names = args.names or [a.name for a in mgr.list_accounts() if a.has_credentials]
+        if not names:
+            print(t("cli.no_accounts"))
+            return 0
+        exit_code = 0
+        for name in names:
+            try:
+                snap = mgr.warm_account(name)
+            except SwitcherError as e:
+                print(f"{name:<20} {t('cli.error_prefix')}{e}", file=sys.stderr)
+                exit_code = 1
+                continue
+            if not snap.ok:
+                print(f"{name:<20} FAIL  {snap.error}")
+                exit_code = 1
+                continue
+            parts = []
+            if snap.five_hour and snap.five_hour.used_pct is not None:
+                parts.append(
+                    f"5h {snap.five_hour.used_pct}%/{format_eta(snap.five_hour.reset_at)}"
+                )
+            if snap.weekly and snap.weekly.used_pct is not None:
+                parts.append(
+                    f"week {snap.weekly.used_pct}%/{format_eta(snap.weekly.reset_at)}"
+                )
+            if snap.weekly_opus and snap.weekly_opus.used_pct is not None:
+                parts.append(
+                    f"opus {snap.weekly_opus.used_pct}%/{format_eta(snap.weekly_opus.reset_at)}"
+                )
+            print(f"{name:<20} OK    {' · '.join(parts) or '(no rate-limit headers)'}")
+        return exit_code
 
     if args.cmd == "lang":
         if args.choice is None:
