@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from time import monotonic
 from typing import Iterable
 
 from rich.text import Text
-from textual import on, work
+from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -38,6 +39,15 @@ MUTED = "#888579"
 DANGER = "#e76f51"
 WARN = "#e0a800"
 OK_COLOR = "#7fb069"
+
+# RowSelected fires for both mouse clicks and Enter. If less time than this
+# has passed since the latest Click, we treat the selection as click-driven
+# and require chain >= 2 (double-click) to actually switch.
+_CLICK_RECENT_WINDOW = 0.25
+
+# How often to re-render the table so the "resets in …" timers tick down
+# without the user pressing F5. Cheap: rereads cached JSON, no network.
+_ETA_TICK_SECONDS = 60
 
 
 def _usage_color(used_pct: int | None) -> str:
@@ -300,6 +310,8 @@ class AccountsApp(App):
         self.manager = manager or AccountManager()
         self._accounts: list[Account] = []
         self._warmups: dict[str, WarmupSnapshot] = {}
+        self._last_click_at: float = 0.0
+        self._last_click_chain: int = 0
         self.title = t("ui.app.title")
         self.sub_title = t("ui.app.subtitle")
 
@@ -331,6 +343,8 @@ class AccountsApp(App):
     def on_mount(self) -> None:
         self._apply_binding_labels()
         self.refresh_all()
+        # Tick the cached ETAs forward without hitting the network.
+        self.set_interval(_ETA_TICK_SECONDS, self.refresh_all)
 
     # ---- data refresh ----
 
@@ -382,8 +396,23 @@ class AccountsApp(App):
     def _on_row_highlight(self, event: DataTable.RowHighlighted) -> None:
         self._update_detail_for_row(event.cursor_row)
 
+    @on(events.Click)
+    def _track_click_chain(self, event: events.Click) -> None:
+        """Remember the latest click's chain count so RowSelected can tell
+        a single click from a double click."""
+        self._last_click_at = monotonic()
+        self._last_click_chain = int(getattr(event, "chain", 1) or 1)
+
     @on(DataTable.RowSelected, "#accounts")
     def _on_row_selected(self, event: DataTable.RowSelected) -> None:
+        # RowSelected fires for BOTH a mouse click and the Enter key. We
+        # treat a mouse click as "switch" only when the user double-clicked
+        # quickly on the same row; a slow second click on the same row stays
+        # a no-op so accidental clicks don't swap the active account.
+        if monotonic() - self._last_click_at <= _CLICK_RECENT_WINDOW:
+            if self._last_click_chain < 2:
+                return  # single click — highlight only
+            self._last_click_chain = 0  # consume the chain
         self.action_switch()
 
     # ---- helpers ----
