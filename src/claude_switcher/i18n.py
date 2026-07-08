@@ -42,7 +42,6 @@ _EN: dict[str, str] = {
     "ui.col.updated": "Updated",
     "ui.col.session": "5h",
     "ui.col.weekly": "Week",
-    "ui.col.warmed": "Warmed",
     "ui.cell.stale": "stale",
     # detail panel
     "ui.detail.title": "Account details",
@@ -259,7 +258,6 @@ _RU: dict[str, str] = {
     "ui.col.updated": "Обновлён",
     "ui.col.session": "5ч",
     "ui.col.weekly": "Неделя",
-    "ui.col.warmed": "Прогрев",
     "ui.cell.stale": "устар.",
     "ui.detail.title": "Детали аккаунта",
     "ui.detail.name": "Имя",

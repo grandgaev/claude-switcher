@@ -112,17 +112,6 @@ def _cell_for_window(window: LimitWindow | None, width: int) -> Text:
     return Text(_crop(f"{used}% · {eta}", width), style=color)
 
 
-def _format_warmed_cell(snapshot: WarmupSnapshot | None, width: int) -> Text:
-    if snapshot is None:
-        return Text("—", style=MUTED)
-    if not snapshot.ok:
-        return Text("err", style=DANGER)
-    local = _to_local(snapshot.checked_at)
-    if local is None:
-        return Text("—", style=MUTED)
-    return Text(_crop(humanize_age(local.replace(tzinfo=None)), width), style=MUTED)
-
-
 def _summary_for_notification(snapshot: WarmupSnapshot) -> str:
     parts: list[str] = []
     if snapshot.five_hour and snapshot.five_hour.used_pct is not None:
@@ -214,7 +203,7 @@ class DetailPanel(Static):
         value_width = self._value_width(label_width)
         highlight_keys = {"name", "email", "status"} if a.is_current else set()
         for label, value, key in rows:
-            text.append(f"  {label:<{label_width}}", style=MUTED)
+            text.append(f"  {_crop(label, label_width):<{label_width}}", style=MUTED)
             style = f"bold {ACCENT}" if key in highlight_keys else "white"
             text.append(f"{_crop(value, value_width)}\n", style=style)
 
@@ -228,7 +217,7 @@ class DetailPanel(Static):
 
     def _append_usage(self, text: Text) -> None:
         snap = self._warmup
-        label_width = 14
+        label_width = 18  # fits the longest translated label, e.g. "Последний прогрев"
         value_width = self._value_width(label_width)
         if snap is None:
             text.append(f"  {t('ui.detail.usage.pending')}\n", style=MUTED)
@@ -237,8 +226,8 @@ class DetailPanel(Static):
         checked_str = checked_local.strftime("%Y-%m-%d %H:%M") if checked_local else t(
             "ui.detail.usage.never"
         )
-        text.append(f"  {t('ui.detail.usage.checked'):<{label_width}}", style=MUTED)
-        text.append(f"{checked_str}\n", style="white")
+        text.append(f"  {_crop(t('ui.detail.usage.checked'), label_width):<{label_width}}", style=MUTED)
+        text.append(f"{_crop(checked_str, value_width)}\n", style="white")
         if not snap.ok:
             text.append(
                 f"  {_crop(t('ui.detail.usage.error', error=snap.error or '—'), value_width + label_width)}\n",
@@ -253,7 +242,7 @@ class DetailPanel(Static):
         for label, window in windows:
             if window is None:
                 continue
-            text.append(f"  {label:<{label_width}}", style=MUTED)
+            text.append(f"  {_crop(label, label_width):<{label_width}}", style=MUTED)
             stale = _is_stale(window)
             color = MUTED if stale else _usage_color(window.used_pct)
             text.append(f"{_crop(_format_window_line(window, stale), value_width)}\n", style=color)
@@ -289,8 +278,8 @@ class SnapshotList(ListView):
         for snap in snapshots:
             label = Text()
             label.append(snap.created.strftime("%m-%d %H:%M:%S"), style=ACCENT)
-            label.append(f"  {snap.summary:<28}", style="white")
-            label.append(f"  {_short_label(snap.label)}", style=MUTED)
+            label.append(f"  {_crop(snap.summary, 18):<18}", style="white")
+            label.append(f"  {_crop(_short_label(snap.label), 12)}", style=MUTED)
             item = ListItem(Label(label))
             item.snapshot = snap  # type: ignore[attr-defined]
             self.append(item)
@@ -357,11 +346,12 @@ class AccountsApp(App):
         yield StatusBar(id="status-bar")
         with Horizontal(id="main"):
             with Vertical(id="left-pane"):
-                # cell_padding=0: the default (1) adds 2 cells per column of
-                # invisible padding, which alone is enough to push the table
-                # past a 100-column terminal and trigger a horizontal
-                # scrollbar — see _COLUMN_WIDTHS below for the real budget.
-                table = DataTable(id="accounts", zebra_stripes=True, cell_padding=0)
+                # cell_padding=1 (Textual's default) keeps a real gap between
+                # columns — cropped cell text usually fills its column
+                # exactly, so padding=0 made adjacent cells visually glue
+                # together with no space at all. _COLUMN_WIDTHS below sizes
+                # each column, including this padding, to the real budget.
+                table = DataTable(id="accounts", zebra_stripes=True, cell_padding=1)
                 table.cursor_type = "row"
                 _add_table_columns(table)
                 yield table
@@ -407,10 +397,9 @@ class AccountsApp(App):
             weekly_cell = _cell_for_window(
                 warmup.weekly if warmup and warmup.ok else None, _COLUMN_WIDTH_MAP["ui.col.weekly"]
             )
-            warmed_cell = _format_warmed_cell(warmup, _COLUMN_WIDTH_MAP["ui.col.warmed"])
             updated = Text(_crop(humanize_age(a.saved_at), _COLUMN_WIDTH_MAP["ui.col.updated"]), style=MUTED)
             table.add_row(
-                marker, name, email, session_cell, weekly_cell, warmed_cell, updated,
+                marker, name, email, session_cell, weekly_cell, updated,
                 key=a.name,
             )
 
@@ -883,15 +872,18 @@ class AccountsApp(App):
         _add_table_columns(table)
 
 
-# Fixed column widths keep the table from outgrowing the left pane and
+# Fixed column widths (content only — DataTable adds cell_padding on each
+# side on top of this) keep the table from outgrowing the left pane and
 # triggering a horizontal scrollbar on common terminal sizes (~100 cols).
+# The "warmed" column was dropped: it's redundant with "Last warm-up" in
+# the detail panel, and removing it left enough budget for every other
+# column to keep a real gap between cells.
 _COLUMN_WIDTHS: tuple[tuple[str, int], ...] = (
     ("ui.col.marker", 1),
-    ("ui.col.name", 12),
-    ("ui.col.email", 16),
-    ("ui.col.session", 10),
-    ("ui.col.weekly", 10),
-    ("ui.col.warmed", 7),
+    ("ui.col.name", 11),
+    ("ui.col.email", 14),
+    ("ui.col.session", 9),
+    ("ui.col.weekly", 9),
     ("ui.col.updated", 7),
 )
 _COLUMN_WIDTH_MAP: dict[str, int] = dict(_COLUMN_WIDTHS)
