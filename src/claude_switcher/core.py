@@ -230,7 +230,12 @@ class AccountManager:
     def save_account(self, name: str) -> None:
         self.validate_name(name)
         live = self._read_live_bundle()
-        if not live.credentials_text and not live.config_fields:
+        if not live.credentials_text:
+            # config_fields (oauthAccount/userID) can linger in ~/.claude.json
+            # even after .credentials.json is gone or was never written this
+            # session. Saving that alone would produce a bundle that looks
+            # like an account but can never be warmed up or switched to
+            # without wiping the live credentials — reject it instead.
             raise SwitcherError(t("err.nothing_to_save"))
         live.name = name
         live.saved_at = datetime.now().isoformat(timespec="seconds")
@@ -242,6 +247,11 @@ class AccountManager:
         if not target_path.exists():
             raise SwitcherError(t("err.account_not_saved", name=name))
         target = _read_bundle(target_path)
+        if not target.credentials_text:
+            # Applying this bundle would delete the live .credentials.json
+            # (see _apply_bundle) with no way back short of logging into
+            # Claude Code again. Refuse rather than silently log the user out.
+            raise SwitcherError(t("err.no_credentials_to_switch", name=name))
 
         previous = self.current_account_name()
         if previous == name:
@@ -252,8 +262,15 @@ class AccountManager:
         self.safety_snapshot(f"before-switch-to-{name}")
 
         if previous:
-            # Auto-save in case live credentials drifted from the saved copy.
-            self.save_account(previous)
+            try:
+                # Auto-save in case live credentials drifted from the saved copy.
+                self.save_account(previous)
+            except SwitcherError:
+                # Live state for `previous` has no credentials right now (it
+                # may have gone stale between switches) — nothing new to
+                # capture, so leave its existing saved bundle untouched
+                # rather than overwrite it with a broken one.
+                pass
 
         self._apply_bundle(target)
         return True, previous

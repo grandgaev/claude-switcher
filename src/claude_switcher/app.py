@@ -391,12 +391,19 @@ class AccountsApp(App):
             marker = Text("●", style=ACCENT) if a.is_current else Text("○", style=MUTED)
             name = Text(_crop(a.name, _COLUMN_WIDTH_MAP["ui.col.name"]), style=f"bold {ACCENT}" if a.is_current else "white")
             email = Text(_crop(a.email or "—", _COLUMN_WIDTH_MAP["ui.col.email"]), style="white" if a.email else MUTED)
-            session_cell = _cell_for_window(
-                warmup.five_hour if warmup and warmup.ok else None, _COLUMN_WIDTH_MAP["ui.col.session"]
-            )
-            weekly_cell = _cell_for_window(
-                warmup.weekly if warmup and warmup.ok else None, _COLUMN_WIDTH_MAP["ui.col.weekly"]
-            )
+            if a.has_credentials:
+                session_cell = _cell_for_window(
+                    warmup.five_hour if warmup and warmup.ok else None, _COLUMN_WIDTH_MAP["ui.col.session"]
+                )
+                weekly_cell = _cell_for_window(
+                    warmup.weekly if warmup and warmup.ok else None, _COLUMN_WIDTH_MAP["ui.col.weekly"]
+                )
+            else:
+                # Distinguish "never warmed yet" (—) from "can never be
+                # warmed" (no saved credentials at all) so a broken save
+                # is obvious in the list, not just on selection.
+                session_cell = Text(_crop(t("ui.cell.no_creds"), _COLUMN_WIDTH_MAP["ui.col.session"]), style=DANGER)
+                weekly_cell = Text(_crop(t("ui.cell.no_creds"), _COLUMN_WIDTH_MAP["ui.col.weekly"]), style=DANGER)
             updated = Text(_crop(humanize_age(a.saved_at), _COLUMN_WIDTH_MAP["ui.col.updated"]), style=MUTED)
             table.add_row(
                 marker, name, email, session_cell, weekly_cell, updated,
