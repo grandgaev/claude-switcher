@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from .i18n import t
+
 # Public Claude Code OAuth client id — same value baked into the CLI.
 CLAUDE_CODE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
@@ -365,20 +367,20 @@ def _parse_iso(value: Any) -> datetime | None:
 
 def format_eta(reset_at: datetime | None, now: datetime | None = None) -> str:
     if reset_at is None:
-        return "—"
+        return t("time.eta.unknown")
     now = now or datetime.now(timezone.utc)
     if reset_at.tzinfo is None:
         reset_at = reset_at.replace(tzinfo=timezone.utc)
     delta = reset_at - now
     seconds = int(delta.total_seconds())
     if seconds <= 0:
-        return "0м"
+        return t("time.eta.now")
     if seconds < 3600:
-        return f"{max(1, seconds // 60)}м"
+        return t("time.eta.min", n=max(1, seconds // 60))
     if seconds < 86400:
         hours, rem = divmod(seconds, 3600)
         minutes = rem // 60
-        return f"{hours}ч {minutes:02d}м" if minutes else f"{hours}ч"
+        return t("time.eta.hour_min", h=hours, m=minutes) if minutes else t("time.eta.hour", n=hours)
     days, rem = divmod(seconds, 86400)
     hours = rem // 3600
-    return f"{days}д {hours}ч" if hours else f"{days}д"
+    return t("time.eta.day_hour", d=days, h=hours) if hours else t("time.eta.day", n=days)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from time import monotonic
 from typing import Iterable
 
@@ -24,6 +25,7 @@ from textual.widgets import (
 from .core import (
     Account,
     AccountManager,
+    ImportResult,
     Snapshot,
     SwitcherError,
     human_size,
@@ -49,6 +51,34 @@ _CLICK_RECENT_WINDOW = 0.25
 # without the user pressing F5. Cheap: rereads cached JSON, no network.
 _ETA_TICK_SECONDS = 60
 
+# How often to silently re-warm every saved account in the background, so
+# usage % and reset timers stay live without the user pressing w/W. This
+# does hit the real Anthropic API (one 1-token ping per account), so keep
+# it infrequent.
+_AUTO_WARM_INTERVAL_SECONDS = 300
+
+
+def _is_stale(window: LimitWindow | None, now: datetime | None = None) -> bool:
+    """A cached window is stale once its reset time has passed — the
+    utilization % in it belonged to a window that already rolled over, so
+    displaying it as current would be misleading."""
+    if window is None or window.reset_at is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    reset_at = window.reset_at
+    if reset_at.tzinfo is None:
+        reset_at = reset_at.replace(tzinfo=timezone.utc)
+    return reset_at <= now
+
+
+def _crop(value: str, width: int) -> str:
+    """Trim ``value`` with an ellipsis so it never wraps onto a new line."""
+    if width < 1 or len(value) <= width:
+        return value
+    if width == 1:
+        return "…"
+    return value[: width - 1] + "…"
+
 
 def _usage_color(used_pct: int | None) -> str:
     if used_pct is None:
@@ -60,22 +90,29 @@ def _usage_color(used_pct: int | None) -> str:
     return OK_COLOR
 
 
-def _cell_for_window(window: LimitWindow | None) -> Text:
-    """Render the per-account 5h / weekly cell as a single short string."""
+def _cell_for_window(window: LimitWindow | None, width: int) -> Text:
+    """Render the per-account 5h / weekly cell as a single short string.
+
+    Cropped to ``width`` ourselves (rather than relying on DataTable's own
+    fixed-column cropping) so long or non-English strings never bleed past
+    the column and never trigger a horizontal scrollbar.
+    """
     if window is None:
         return Text("—", style=MUTED)
+    if _is_stale(window):
+        return Text(_crop(t("ui.cell.stale"), width), style=MUTED)
     used = window.used_pct
     eta = format_eta(window.reset_at)
     if used is None and window.status is None:
         return Text("—", style=MUTED)
     if used is None:
         label = f"{window.status or '—'} · {eta}"
-        return Text(label, style=WARN if window.status not in (None, "ok") else MUTED)
+        return Text(_crop(label, width), style=WARN if window.status not in (None, "ok") else MUTED)
     color = _usage_color(used)
-    return Text(f"{used}% · {eta}", style=color)
+    return Text(_crop(f"{used}% · {eta}", width), style=color)
 
 
-def _format_warmed_cell(snapshot: WarmupSnapshot | None) -> Text:
+def _format_warmed_cell(snapshot: WarmupSnapshot | None, width: int) -> Text:
     if snapshot is None:
         return Text("—", style=MUTED)
     if not snapshot.ok:
@@ -83,24 +120,7 @@ def _format_warmed_cell(snapshot: WarmupSnapshot | None) -> Text:
     local = _to_local(snapshot.checked_at)
     if local is None:
         return Text("—", style=MUTED)
-    return Text(_humanize_since(local), style=MUTED)
-
-
-def _humanize_since(when_local: datetime) -> str:
-    delta = datetime.now(when_local.tzinfo) - when_local
-    seconds = int(delta.total_seconds())
-    if seconds < 0:
-        return when_local.strftime("%H:%M")
-    if seconds < 60:
-        return "только что"
-    if seconds < 3600:
-        return f"{seconds // 60}м назад"
-    if seconds < 86400:
-        return f"{seconds // 3600}ч назад"
-    days = seconds // 86400
-    if days < 30:
-        return f"{days}д назад"
-    return when_local.strftime("%Y-%m-%d")
+    return Text(_crop(humanize_age(local.replace(tzinfo=None)), width), style=MUTED)
 
 
 def _summary_for_notification(snapshot: WarmupSnapshot) -> str:
@@ -190,18 +210,26 @@ class DetailPanel(Static):
              t("ui.detail.status_active") if a.is_current else t("ui.detail.status_saved"),
              "status"),
         ]
+        label_width = 12
+        value_width = self._value_width(label_width)
         highlight_keys = {"name", "email", "status"} if a.is_current else set()
         for label, value, key in rows:
-            text.append(f"  {label:<12}", style=MUTED)
+            text.append(f"  {label:<{label_width}}", style=MUTED)
             style = f"bold {ACCENT}" if key in highlight_keys else "white"
-            text.append(f"{value}\n", style=style)
+            text.append(f"{_crop(value, value_width)}\n", style=style)
 
         text.append(f"\n{t('ui.detail.section.usage')}\n", style=f"bold {ACCENT}")
         self._append_usage(text)
         self.update(text)
 
+    def _value_width(self, label_width: int) -> int:
+        available = self.size.width - label_width - 2
+        return available if available > 8 else 8
+
     def _append_usage(self, text: Text) -> None:
         snap = self._warmup
+        label_width = 14
+        value_width = self._value_width(label_width)
         if snap is None:
             text.append(f"  {t('ui.detail.usage.pending')}\n", style=MUTED)
             return
@@ -209,11 +237,11 @@ class DetailPanel(Static):
         checked_str = checked_local.strftime("%Y-%m-%d %H:%M") if checked_local else t(
             "ui.detail.usage.never"
         )
-        text.append(f"  {t('ui.detail.usage.checked'):<14}", style=MUTED)
+        text.append(f"  {t('ui.detail.usage.checked'):<{label_width}}", style=MUTED)
         text.append(f"{checked_str}\n", style="white")
         if not snap.ok:
             text.append(
-                f"  {t('ui.detail.usage.error', error=snap.error or '—')}\n",
+                f"  {_crop(t('ui.detail.usage.error', error=snap.error or '—'), value_width + label_width)}\n",
                 style=DANGER,
             )
             return
@@ -225,12 +253,15 @@ class DetailPanel(Static):
         for label, window in windows:
             if window is None:
                 continue
-            text.append(f"  {label:<14}", style=MUTED)
-            text.append(f"{_format_window_line(window)}\n",
-                        style=_usage_color(window.used_pct))
+            text.append(f"  {label:<{label_width}}", style=MUTED)
+            stale = _is_stale(window)
+            color = MUTED if stale else _usage_color(window.used_pct)
+            text.append(f"{_crop(_format_window_line(window, stale), value_width)}\n", style=color)
 
 
-def _format_window_line(window: LimitWindow) -> str:
+def _format_window_line(window: LimitWindow, stale: bool = False) -> str:
+    if stale:
+        return t("ui.detail.usage.stale")
     used = window.used_pct
     eta = format_eta(window.reset_at)
     if used is not None:
@@ -282,6 +313,8 @@ _BINDING_KEYS: dict[str, str] = {
     "warm": "ui.binding.warm",
     "warm_all": "ui.binding.warm_all",
     "language": "ui.binding.lang",
+    "export": "ui.binding.export",
+    "import": "ui.binding.import",
     "help": "ui.binding.help",
     "quit": "ui.binding.quit",
 }
@@ -300,6 +333,8 @@ class AccountsApp(App):
         Binding("w", "warm", "warm"),
         Binding("W", "warm_all", "warm all"),
         Binding("l", "language", "language"),
+        Binding("e", "export", "export"),
+        Binding("i", "import", "import"),
         Binding("f5", "refresh", "refresh"),
         Binding("question_mark", "help", "help", key_display="?"),
         Binding("q", "quit", "quit"),
@@ -322,17 +357,13 @@ class AccountsApp(App):
         yield StatusBar(id="status-bar")
         with Horizontal(id="main"):
             with Vertical(id="left-pane"):
-                table = DataTable(id="accounts", zebra_stripes=True)
+                # cell_padding=0: the default (1) adds 2 cells per column of
+                # invisible padding, which alone is enough to push the table
+                # past a 100-column terminal and trigger a horizontal
+                # scrollbar — see _COLUMN_WIDTHS below for the real budget.
+                table = DataTable(id="accounts", zebra_stripes=True, cell_padding=0)
                 table.cursor_type = "row"
-                table.add_columns(
-                    t("ui.col.marker"),
-                    t("ui.col.name"),
-                    t("ui.col.email"),
-                    t("ui.col.session"),
-                    t("ui.col.weekly"),
-                    t("ui.col.warmed"),
-                    t("ui.col.updated"),
-                )
+                _add_table_columns(table)
                 yield table
             with Vertical(id="right-pane"):
                 yield DetailPanel()
@@ -345,6 +376,8 @@ class AccountsApp(App):
         self.refresh_all()
         # Tick the cached ETAs forward without hitting the network.
         self.set_interval(_ETA_TICK_SECONDS, self.refresh_all)
+        # Keep usage % and reset timers live without manual w/W presses.
+        self.set_interval(_AUTO_WARM_INTERVAL_SECONDS, self._auto_warm_tick)
 
     # ---- data refresh ----
 
@@ -366,12 +399,16 @@ class AccountsApp(App):
         for a in self._accounts:
             warmup = self._warmups.get(a.name)
             marker = Text("●", style=ACCENT) if a.is_current else Text("○", style=MUTED)
-            name = Text(a.name, style=f"bold {ACCENT}" if a.is_current else "white")
-            email = Text(a.email or "—", style="white" if a.email else MUTED)
-            session_cell = _cell_for_window(warmup.five_hour if warmup and warmup.ok else None)
-            weekly_cell = _cell_for_window(warmup.weekly if warmup and warmup.ok else None)
-            warmed_cell = _format_warmed_cell(warmup)
-            updated = Text(humanize_age(a.saved_at), style=MUTED)
+            name = Text(_crop(a.name, _COLUMN_WIDTH_MAP["ui.col.name"]), style=f"bold {ACCENT}" if a.is_current else "white")
+            email = Text(_crop(a.email or "—", _COLUMN_WIDTH_MAP["ui.col.email"]), style="white" if a.email else MUTED)
+            session_cell = _cell_for_window(
+                warmup.five_hour if warmup and warmup.ok else None, _COLUMN_WIDTH_MAP["ui.col.session"]
+            )
+            weekly_cell = _cell_for_window(
+                warmup.weekly if warmup and warmup.ok else None, _COLUMN_WIDTH_MAP["ui.col.weekly"]
+            )
+            warmed_cell = _format_warmed_cell(warmup, _COLUMN_WIDTH_MAP["ui.col.warmed"])
+            updated = Text(_crop(humanize_age(a.saved_at), _COLUMN_WIDTH_MAP["ui.col.updated"]), style=MUTED)
             table.add_row(
                 marker, name, email, session_cell, weekly_cell, warmed_cell, updated,
                 key=a.name,
@@ -683,7 +720,7 @@ class AccountsApp(App):
         self._warm_worker(account.name)
 
     @work(exclusive=True, thread=True)
-    def _warm_all_worker(self, names: list[str]) -> None:
+    def _warm_all_worker(self, names: list[str], notify: bool = True) -> None:
         ok = 0
         for name in names:
             try:
@@ -695,10 +732,11 @@ class AccountsApp(App):
             if snapshot.ok:
                 ok += 1
             self.call_from_thread(self.refresh_all)
-        self.call_from_thread(
-            self._notify_ok,
-            t("ui.notify.warm_all_done", ok=ok, total=len(names)),
-        )
+        if notify:
+            self.call_from_thread(
+                self._notify_ok,
+                t("ui.notify.warm_all_done", ok=ok, total=len(names)),
+            )
 
     def action_warm_all(self) -> None:
         names = [a.name for a in self._accounts if a.has_credentials]
@@ -707,6 +745,18 @@ class AccountsApp(App):
             return
         self._notify_ok(t("ui.notify.warming_all", count=len(names)))
         self._warm_all_worker(names)
+
+    def _auto_warm_tick(self) -> None:
+        """Silently refresh usage % / reset timers for every saved account.
+
+        Runs every ``_AUTO_WARM_INTERVAL_SECONDS`` so the numbers stay live
+        even if the user never presses w/W. No toast on success — only
+        surfaces via the table/detail panel; a background auto-warm run
+        already in flight is skipped (``exclusive=True`` on the worker).
+        """
+        names = [a.name for a in self._accounts if a.has_credentials]
+        if names:
+            self._warm_all_worker(names, notify=False)
 
     def action_help(self) -> None:
         self.push_screen(HelpModal())
@@ -722,27 +772,134 @@ class AccountsApp(App):
         if choice == current_choice():
             return
         resolved = set_language(choice)
+        self._refresh_localized_ui()
+        name = t(f"modal.lang.name.{choice}") if choice == "auto" else t(f"modal.lang.name.{resolved}")
+        self._notify_ok(t("ui.notify.language_set", lang=name))
+
+    def _refresh_localized_ui(self) -> None:
+        """Re-render every translated piece of UI for the currently active language."""
         self.title = t("ui.app.title")
         self.sub_title = t("ui.app.subtitle")
         self._rebuild_table_columns()
         self.query_one("#snapshot-title", Label).update(t("ui.snapshot_title"))
         self._apply_binding_labels()
         self.refresh_all()
-        name = t(f"modal.lang.name.{choice}") if choice == "auto" else t(f"modal.lang.name.{resolved}")
-        self._notify_ok(t("ui.notify.language_set", lang=name))
+
+    # ---- export / import ----
+
+    def action_export(self) -> None:
+        default_path = str(Path.home() / "claude-switcher-export.cswitchconfig")
+
+        def _after(path: str | None) -> None:
+            if path:
+                self._export_worker(path)
+
+        self.push_screen(
+            TextPromptModal(
+                t("modal.export.title"),
+                t("modal.export.body", count=len(self._accounts)),
+                placeholder=t("modal.export.placeholder"),
+                initial=default_path,
+                confirm_label=t("modal.export.confirm"),
+            ),
+            _after,
+        )
+
+    @work(exclusive=True, thread=True)
+    def _export_worker(self, path: str) -> None:
+        try:
+            count = self.manager.export_config(path)
+        except SwitcherError as exc:
+            self.call_from_thread(self._notify_error, exc)
+            return
+        except OSError as exc:  # pragma: no cover - defensive
+            self.call_from_thread(self._notify_error, exc)
+            return
+        self.call_from_thread(self._notify_ok, t("ui.notify.exported", count=count, path=path))
+
+    def action_import(self) -> None:
+        def _after(path: str | None) -> None:
+            if path:
+                self._import_worker(path, overwrite=False)
+
+        self.push_screen(
+            TextPromptModal(
+                t("modal.import.title"),
+                t("modal.import.body"),
+                placeholder=t("modal.import.placeholder"),
+                confirm_label=t("modal.import.confirm"),
+            ),
+            _after,
+        )
+
+    @work(exclusive=True, thread=True)
+    def _import_worker(self, path: str, overwrite: bool) -> None:
+        try:
+            result = self.manager.import_config(path, overwrite=overwrite)
+        except SwitcherError as exc:
+            self.call_from_thread(self._notify_error, exc)
+            return
+        except OSError as exc:  # pragma: no cover - defensive
+            self.call_from_thread(self._notify_error, exc)
+            return
+
+        if result.skipped and not overwrite:
+            self.call_from_thread(self._prompt_import_overwrite, path, result)
+            return
+        self.call_from_thread(self._finish_import, result)
+
+    def _prompt_import_overwrite(self, path: str, result: ImportResult) -> None:
+        self.push_screen(
+            ConfirmModal(
+                t("modal.import_conflict.title"),
+                t(
+                    "modal.import_conflict.body",
+                    count=len(result.skipped),
+                    names=", ".join(result.skipped),
+                ),
+                confirm_label=t("modal.import_conflict.confirm"),
+                danger=True,
+            ),
+            lambda ok: self._import_worker(path, overwrite=True) if ok else self._finish_import(result),
+        )
+
+    def _finish_import(self, result: ImportResult) -> None:
+        if result.language:
+            self._refresh_localized_ui()
+        else:
+            self.refresh_all()
+        self._notify_ok(
+            t(
+                "ui.notify.imported",
+                imported=len(result.imported),
+                skipped=len(result.skipped),
+                overwritten=len(result.overwritten),
+            )
+        )
 
     def _rebuild_table_columns(self) -> None:
         table = self.query_one("#accounts", DataTable)
         table.clear(columns=True)
-        table.add_columns(
-            t("ui.col.marker"),
-            t("ui.col.name"),
-            t("ui.col.email"),
-            t("ui.col.session"),
-            t("ui.col.weekly"),
-            t("ui.col.warmed"),
-            t("ui.col.updated"),
-        )
+        _add_table_columns(table)
+
+
+# Fixed column widths keep the table from outgrowing the left pane and
+# triggering a horizontal scrollbar on common terminal sizes (~100 cols).
+_COLUMN_WIDTHS: tuple[tuple[str, int], ...] = (
+    ("ui.col.marker", 1),
+    ("ui.col.name", 12),
+    ("ui.col.email", 16),
+    ("ui.col.session", 10),
+    ("ui.col.weekly", 10),
+    ("ui.col.warmed", 7),
+    ("ui.col.updated", 7),
+)
+_COLUMN_WIDTH_MAP: dict[str, int] = dict(_COLUMN_WIDTHS)
+
+
+def _add_table_columns(table: DataTable) -> None:
+    for key, width in _COLUMN_WIDTHS:
+        table.add_column(_crop(t(key), width), width=width, key=key)
 
 
 def run() -> None:

@@ -18,7 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .i18n import t
+from . import __version__
+from .i18n import LANGUAGE_CHOICES, current_choice, set_language, t
 from .warming import WarmupSnapshot, warm_credentials
 
 
@@ -27,6 +28,13 @@ MAX_SAFETY_SNAPSHOTS = 20
 BUNDLE_SUFFIX = ".account.json"
 BUNDLE_VERSION = 1
 WARMUP_CACHE_FILENAME = ".warmup-cache.json"
+
+# Portable export/import file — a single JSON file (any extension; the app
+# suggests ``.cswitchconfig``) bundling every saved account plus the
+# language setting, so a user can move their whole set of profiles to
+# another machine, on any OS, in one step.
+CONFIG_FORMAT = "claude-switcher-config"
+CONFIG_FORMAT_VERSION = 1
 
 # Whitelist of fields in ~/.claude.json that carry identity / auth.
 # Everything else (projects, mcpServers, tipsHistory, numStartups, …) stays.
@@ -63,6 +71,14 @@ class Snapshot:
     size_bytes: int
     label: str
     summary: str  # short human-readable identity hint (email / "no auth")
+
+
+@dataclass(frozen=True)
+class ImportResult:
+    imported: tuple[str, ...]
+    skipped: tuple[str, ...]
+    overwritten: tuple[str, ...]
+    language: str | None
 
 
 @dataclass
@@ -272,6 +288,87 @@ class AccountManager:
                 self.warmup_cache_path,
                 json.dumps(cache, indent=2, ensure_ascii=False),
             )
+
+    # ---- portable export/import ----
+
+    def export_config(self, path: Path) -> int:
+        """Write every saved account bundle + language choice into one file.
+
+        Safety snapshots are excluded — they're an internal safety net, not
+        a "profile" to carry to another machine. Returns the number of
+        accounts written.
+        """
+        accounts: list[dict[str, Any]] = []
+        for p in sorted(self.backup_dir.glob(f"*{BUNDLE_SUFFIX}")):
+            name = p.name[: -len(BUNDLE_SUFFIX)]
+            if not name or name.startswith("."):
+                continue
+            try:
+                accounts.append(_read_bundle(p).to_json())
+            except (OSError, json.JSONDecodeError):
+                continue
+
+        payload = {
+            "format": CONFIG_FORMAT,
+            "format_version": CONFIG_FORMAT_VERSION,
+            "exported_at": datetime.now().isoformat(timespec="seconds"),
+            "generator": f"claude-switcher/{__version__}",
+            "settings": {"lang": current_choice()},
+            "accounts": accounts,
+        }
+        target = Path(path).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_text(target, json.dumps(payload, indent=2, ensure_ascii=False))
+        return len(accounts)
+
+    def import_config(self, path: Path, overwrite: bool = False) -> ImportResult:
+        """Load accounts + language choice from a file written by ``export_config``.
+
+        Accounts whose name already exists are skipped unless ``overwrite``
+        is set, in which case they're replaced with the imported bundle.
+        """
+        source = Path(path).expanduser()
+        if not source.is_file():
+            raise SwitcherError(t("err.config_not_found", path=str(source)))
+        try:
+            raw = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            raise SwitcherError(t("err.bad_config", path=str(source))) from e
+        if not isinstance(raw, dict) or raw.get("format") != CONFIG_FORMAT:
+            raise SwitcherError(t("err.bad_config", path=str(source)))
+
+        imported: list[str] = []
+        skipped: list[str] = []
+        overwritten: list[str] = []
+        for entry in raw.get("accounts") or []:
+            if not isinstance(entry, dict):
+                continue
+            bundle = _Bundle.from_json(entry)
+            name = bundle.name
+            if not name or not VALID_NAME_RE.match(name):
+                continue
+            target = self._bundle_path(name)
+            if target.exists() and not overwrite:
+                skipped.append(name)
+                continue
+            was_existing = target.exists()
+            _write_bundle(target, bundle)
+            (overwritten if was_existing else imported).append(name)
+
+        language: str | None = None
+        settings = raw.get("settings")
+        if isinstance(settings, dict):
+            lang = settings.get("lang")
+            if lang in LANGUAGE_CHOICES:
+                set_language(lang)
+                language = lang
+
+        return ImportResult(
+            imported=tuple(imported),
+            skipped=tuple(skipped),
+            overwritten=tuple(overwritten),
+            language=language,
+        )
 
     # ---- warm-up ----
 

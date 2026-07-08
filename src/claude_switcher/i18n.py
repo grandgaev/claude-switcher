@@ -43,6 +43,7 @@ _EN: dict[str, str] = {
     "ui.col.session": "5h",
     "ui.col.weekly": "Week",
     "ui.col.warmed": "Warmed",
+    "ui.cell.stale": "stale",
     # detail panel
     "ui.detail.title": "Account details",
     "ui.detail.name": "Name",
@@ -72,6 +73,7 @@ _EN: dict[str, str] = {
     "ui.detail.usage.value_status": "status={status} · resets in {eta}",
     "ui.detail.usage.value_status_only": "status={status}",
     "ui.detail.usage.value_unknown": "no data from server",
+    "ui.detail.usage.stale": "stale — window rolled over, waiting for the next auto-refresh (every 5 min)",
     # snapshots
     "ui.snapshot_title": "Safety snapshots",
     "ui.snapshot.no_email": "(no email)",
@@ -100,6 +102,8 @@ _EN: dict[str, str] = {
     "ui.notify.summary.session": "5h {pct}% · {eta}",
     "ui.notify.summary.weekly": "Week {pct}% · {eta}",
     "ui.notify.summary.empty": "no rate-limit headers in response",
+    "ui.notify.exported": "Exported {count} account(s) to {path}",
+    "ui.notify.imported": "Imported {imported}, skipped {skipped}, overwritten {overwritten}.",
     # bindings (Footer)
     "ui.binding.switch": "switch",
     "ui.binding.save": "save",
@@ -110,6 +114,8 @@ _EN: dict[str, str] = {
     "ui.binding.warm": "warm",
     "ui.binding.warm_all": "warm all",
     "ui.binding.lang": "language",
+    "ui.binding.export": "export",
+    "ui.binding.import": "import",
     "ui.binding.help": "help",
     "ui.binding.quit": "quit",
     # modals: shared
@@ -136,6 +142,19 @@ _EN: dict[str, str] = {
     "modal.rename.title": "Rename",
     "modal.rename.body": "New name for “{name}”.",
     "modal.rename.confirm": "Rename",
+    # export
+    "modal.export.title": "Export config",
+    "modal.export.body": "Save all {count} account(s) and the language setting into one portable file.\nThe file contains plaintext OAuth tokens — handle it like a secret.",
+    "modal.export.placeholder": "~/claude-switcher-export.cswitchconfig",
+    "modal.export.confirm": "Export",
+    # import
+    "modal.import.title": "Import config",
+    "modal.import.body": "Load accounts and language setting from a previously exported file.",
+    "modal.import.placeholder": "~/claude-switcher-export.cswitchconfig",
+    "modal.import.confirm": "Import",
+    "modal.import_conflict.title": "Name conflicts",
+    "modal.import_conflict.body": "{count} account(s) already exist and were skipped: {names}.\n\nOverwrite them with the imported data?",
+    "modal.import_conflict.confirm": "Overwrite",
     # restore
     "modal.restore.title": "Restore from snapshot?",
     "modal.restore.body": "Auth state will be restored from “{hint}” ({when}).\n\nA fresh safety snapshot will be taken first.",
@@ -152,6 +171,8 @@ _EN: dict[str, str] = {
         "[b]w[/]               warm up selected account (ping Haiku 4.5)\n"
         "[b]W / Shift+W[/]     warm up every saved account\n"
         "[b]l[/]               change language\n"
+        "[b]e[/]               export all accounts to a .cswitchconfig file\n"
+        "[b]i[/]               import accounts from a .cswitchconfig file\n"
         "[b]F5[/]              refresh\n"
         "[b]?[/]               this screen\n"
         "[b]q / Ctrl+C[/]      quit\n"
@@ -167,7 +188,9 @@ _EN: dict[str, str] = {
         "[#d97757 b]Warm-up[/]: sends a 1-token “hi” to "
         "[i]claude-haiku-4-5[/] using the saved OAuth token, then "
         "shows how much of the 5h session window and the weekly "
-        "window is already spent and when each one resets.\n"
+        "window is already spent and when each one resets. Every "
+        "saved account is warmed automatically every 5 minutes so "
+        "these numbers stay live without pressing w/W.\n"
         "\n"
         "[dim]A safety snapshot of the live auth is taken before "
         "every switch and restore (the last 20 are kept).[/]"
@@ -193,6 +216,8 @@ _EN: dict[str, str] = {
     "err.snapshot_not_found": "Snapshot “{name}” not found.",
     "err.bad_bundle": "Corrupt bundle: {name}",
     "err.no_credentials_to_warm": "Account “{name}” has no credentials saved — nothing to warm up.",
+    "err.bad_config": "Not a Claude Switcher config file: {path}",
+    "err.config_not_found": "File not found: {path}",
     # humanize age
     "time.now": "just now",
     "time.min": "{n} min ago",
@@ -200,6 +225,14 @@ _EN: dict[str, str] = {
     "time.day": "{n} d ago",
     "time.month": "{n} mo ago",
     "time.year": "{n} y ago",
+    # reset ETA (short form, used for "resets in …" countdowns)
+    "time.eta.unknown": "—",
+    "time.eta.now": "0m",
+    "time.eta.min": "{n}m",
+    "time.eta.hour": "{n}h",
+    "time.eta.hour_min": "{h}h {m:02d}m",
+    "time.eta.day": "{n}d",
+    "time.eta.day_hour": "{d}d {h}h",
     # cli
     "cli.no_accounts": "No saved accounts.",
     "cli.unknown": "(unknown)",
@@ -207,6 +240,9 @@ _EN: dict[str, str] = {
     "cli.switched": "Switched: {prev} -> {name}",
     "cli.saved": "Saved: {name}",
     "cli.error_prefix": "Error: ",
+    "cli.exported": "Exported {count} account(s) to {path}",
+    "cli.imported": "Imported {imported}, skipped {skipped}, overwritten {overwritten}",
+    "cli.not_a_config_file": "Not a Claude Switcher config file: {path}",
 }
 
 _RU: dict[str, str] = {
@@ -224,6 +260,7 @@ _RU: dict[str, str] = {
     "ui.col.session": "5ч",
     "ui.col.weekly": "Неделя",
     "ui.col.warmed": "Прогрев",
+    "ui.cell.stale": "устар.",
     "ui.detail.title": "Детали аккаунта",
     "ui.detail.name": "Имя",
     "ui.detail.email": "Email",
@@ -252,6 +289,7 @@ _RU: dict[str, str] = {
     "ui.detail.usage.value_status": "статус={status} · сброс через {eta}",
     "ui.detail.usage.value_status_only": "статус={status}",
     "ui.detail.usage.value_unknown": "сервер не вернул данные",
+    "ui.detail.usage.stale": "устарело — окно сброшено, жду автообновления (раз в 5 мин)",
     "ui.snapshot_title": "Safety snapshots",
     "ui.snapshot.no_email": "(без email)",
     "ui.snapshot.no_auth": "(нет auth)",
@@ -278,6 +316,8 @@ _RU: dict[str, str] = {
     "ui.notify.summary.session": "5ч {pct}% · {eta}",
     "ui.notify.summary.weekly": "Неделя {pct}% · {eta}",
     "ui.notify.summary.empty": "сервер не вернул rate-limit заголовков",
+    "ui.notify.exported": "Экспортировано {count} аккаунт(ов) в {path}",
+    "ui.notify.imported": "Импортировано {imported}, пропущено {skipped}, перезаписано {overwritten}.",
     "ui.binding.switch": "переключить",
     "ui.binding.save": "сохранить",
     "ui.binding.rename": "переимен.",
@@ -287,6 +327,8 @@ _RU: dict[str, str] = {
     "ui.binding.warm": "прогрев",
     "ui.binding.warm_all": "прогрев всех",
     "ui.binding.lang": "язык",
+    "ui.binding.export": "экспорт",
+    "ui.binding.import": "импорт",
     "ui.binding.help": "помощь",
     "ui.binding.quit": "выход",
     "modal.cancel": "Отмена",
@@ -307,6 +349,17 @@ _RU: dict[str, str] = {
     "modal.rename.title": "Переименовать",
     "modal.rename.body": "Новое имя для «{name}».",
     "modal.rename.confirm": "Переименовать",
+    "modal.export.title": "Экспорт конфига",
+    "modal.export.body": "Сохранить все {count} аккаунт(ов) и язык интерфейса в один переносимый файл.\nФайл содержит OAuth-токены в открытом виде — храни его как секрет.",
+    "modal.export.placeholder": "~/claude-switcher-export.cswitchconfig",
+    "modal.export.confirm": "Экспорт",
+    "modal.import.title": "Импорт конфига",
+    "modal.import.body": "Загрузить аккаунты и язык интерфейса из ранее экспортированного файла.",
+    "modal.import.placeholder": "~/claude-switcher-export.cswitchconfig",
+    "modal.import.confirm": "Импорт",
+    "modal.import_conflict.title": "Конфликты имён",
+    "modal.import_conflict.body": "{count} аккаунт(ов) уже существуют и были пропущены: {names}.\n\nПерезаписать их данными из файла?",
+    "modal.import_conflict.confirm": "Перезаписать",
     "modal.restore.title": "Восстановить из snapshot?",
     "modal.restore.body": "Auth-состояние будет восстановлено из «{hint}» ({when}).\n\nПеред этим будет сделан новый safety snapshot.",
     "modal.restore.confirm": "Восстановить",
@@ -321,6 +374,8 @@ _RU: dict[str, str] = {
         "[b]w[/]               прогреть выбранный аккаунт (ping Haiku 4.5)\n"
         "[b]W / Shift+W[/]     прогреть все сохранённые аккаунты\n"
         "[b]l[/]               сменить язык\n"
+        "[b]e[/]               экспортировать все аккаунты в .cswitchconfig\n"
+        "[b]i[/]               импортировать аккаунты из .cswitchconfig\n"
         "[b]F5[/]              обновить список\n"
         "[b]?[/]               этот экран\n"
         "[b]q / Ctrl+C[/]      выход\n"
@@ -336,7 +391,9 @@ _RU: dict[str, str] = {
         "[#d97757 b]Прогрев[/]: отправляет короткое «hi» к "
         "[i]claude-haiku-4-5[/] под сохранённым OAuth-токеном, "
         "после чего показывает, сколько съедено за 5-часовую сессию "
-        "и за неделю и когда оба лимита обнулятся.\n"
+        "и за неделю и когда оба лимита обнулятся. Каждый сохранённый "
+        "аккаунт прогревается автоматически раз в 5 минут, чтобы эти "
+        "цифры оставались живыми без нажатия w/W.\n"
         "\n"
         "[dim]Перед каждым переключением и восстановлением "
         "создаётся snapshot текущей auth в "
@@ -361,18 +418,30 @@ _RU: dict[str, str] = {
     "err.snapshot_not_found": "Snapshot «{name}» не найден.",
     "err.bad_bundle": "Битый бандл: {name}",
     "err.no_credentials_to_warm": "У «{name}» не сохранены credentials — прогревать нечего.",
+    "err.bad_config": "Это не конфиг-файл Claude Switcher: {path}",
+    "err.config_not_found": "Файл не найден: {path}",
     "time.now": "только что",
     "time.min": "{n} мин назад",
     "time.hour": "{n} ч назад",
     "time.day": "{n} дн назад",
     "time.month": "{n} мес назад",
     "time.year": "{n} г назад",
+    "time.eta.unknown": "—",
+    "time.eta.now": "0м",
+    "time.eta.min": "{n}м",
+    "time.eta.hour": "{n}ч",
+    "time.eta.hour_min": "{h}ч {m:02d}м",
+    "time.eta.day": "{n}д",
+    "time.eta.day_hour": "{d}д {h}ч",
     "cli.no_accounts": "Сохранённых аккаунтов нет.",
     "cli.unknown": "(неизвестно)",
     "cli.already_active": "Уже активен: {name}",
     "cli.switched": "Переключено: {prev} -> {name}",
     "cli.saved": "Сохранено: {name}",
     "cli.error_prefix": "Ошибка: ",
+    "cli.exported": "Экспортировано {count} аккаунт(ов) в {path}",
+    "cli.imported": "Импортировано {imported}, пропущено {skipped}, перезаписано {overwritten}",
+    "cli.not_a_config_file": "Это не конфиг-файл Claude Switcher: {path}",
 }
 
 TRANSLATIONS: dict[ResolvedLang, dict[str, str]] = {"en": _EN, "ru": _RU}

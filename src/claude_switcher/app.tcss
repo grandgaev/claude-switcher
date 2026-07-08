@@ -24,25 +24,11 @@ Footer > .footer--key {
 }
 
 #status-bar {
-    height: 3;
+    height: 4;
     background: #1f1d1a;
     color: #e8e6e3;
     padding: 1 2;
     border-bottom: solid #2a2724;
-}
-
-#status-bar .current-label {
-    color: #888579;
-}
-
-#status-bar .current-name {
-    color: #d97757;
-    text-style: bold;
-}
-
-#status-bar .current-unknown {
-    color: #e76f51;
-    text-style: italic;
 }
 
 #main {
@@ -50,12 +36,14 @@ Footer > .footer--key {
 }
 
 #left-pane {
-    width: 60%;
+    width: 65%;
+    min-width: 60;
     border-right: solid #2a2724;
 }
 
 #right-pane {
     width: 1fr;
+    min-width: 38;
     padding: 1 2;
 }
 
@@ -82,28 +70,6 @@ DataTable > .datatable--hover {
 
 DataTable > .datatable--odd-row {
     background: #19181655;
-}
-
-#details-title {
-    color: #d97757;
-    text-style: bold;
-    margin-bottom: 1;
-}
-
-#details-grid {
-    grid-size: 2;
-    grid-columns: 16 1fr;
-    grid-rows: auto;
-    height: auto;
-    margin-bottom: 1;
-}
-
-#details-grid .label {
-    color: #888579;
-}
-
-#details-grid .value {
-    color: #e8e6e3;
 }
 
 #snapshot-title {

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-switcher"
-version = "0.1.0"
-description = "Auth-only multi-account orchestrator for Claude Code (Windows TUI)"
+version = "0.2.0"
+description = "Auth-only multi-account orchestrator for Claude Code (cross-platform TUI)"
 readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.10"

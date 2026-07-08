@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="claude-switcher",
-        description="Multi-account orchestrator for Claude Code (auth-only, Windows).",
+        description="Multi-account orchestrator for Claude Code (auth-only).",
     )
     parser.add_argument(
         "--lang",
@@ -51,6 +51,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_lang = sub.add_parser("lang", help="get or set persistent language (auto|en|ru)")
     p_lang.add_argument("choice", nargs="?", choices=LANGUAGE_CHOICES)
+    p_export = sub.add_parser(
+        "export", help="export all saved accounts + language to one portable file"
+    )
+    p_export.add_argument("path", help="destination file, e.g. accounts.cswitchconfig")
+    p_import = sub.add_parser(
+        "import", help="import accounts + language from a previously exported file"
+    )
+    p_import.add_argument("path", help="source file previously written by 'export'")
+    p_import.add_argument(
+        "--overwrite", action="store_true", help="replace accounts that already exist"
+    )
 
     args = parser.parse_args(argv)
 
@@ -141,6 +152,33 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         resolved = set_language(args.choice, persist=True)
         print(f"choice={args.choice}  resolved={resolved}")
+        return 0
+
+    if args.cmd == "export":
+        try:
+            count = mgr.export_config(args.path)
+        except SwitcherError as e:
+            print(f"{t('cli.error_prefix')}{e}", file=sys.stderr)
+            return 1
+        print(t("cli.exported", count=count, path=args.path))
+        return 0
+
+    if args.cmd == "import":
+        try:
+            result = mgr.import_config(args.path, overwrite=args.overwrite)
+        except SwitcherError as e:
+            print(f"{t('cli.error_prefix')}{e}", file=sys.stderr)
+            return 1
+        print(
+            t(
+                "cli.imported",
+                imported=len(result.imported),
+                skipped=len(result.skipped),
+                overwritten=len(result.overwritten),
+            )
+        )
+        if result.skipped and not args.overwrite:
+            print(f"  skipped (already exist): {', '.join(result.skipped)}")
         return 0
 
     parser.print_help()
