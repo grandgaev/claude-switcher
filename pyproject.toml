@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-switcher"
-version = "0.2.1"
+version = "0.2.2"
 description = "Auth-only multi-account orchestrator for Claude Code (cross-platform TUI)"
 readme = "README.md"
 license = {file = "LICENSE"}
